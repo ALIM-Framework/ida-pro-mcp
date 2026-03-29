@@ -130,6 +130,96 @@ Another thing to keep in mind is that LLMs will not perform well on obfuscated c
 
 You should also use a tool like Lumina or FLIRT to try and resolve all the open source library code and the C++ STL, this will further improve the accuracy.
 
+## Multi-Instance Mode (Cross-Binary Analysis)
+
+You can connect two IDA instances to one MCP server simultaneously. This is useful when you have one binary with debug symbols (e.g. a Mac build) and another without (e.g. a Windows build), and you want the AI to map names, types, and structures from one to the other.
+
+### Setup
+
+**1. Install the package from source** so your changes are live:
+
+```sh
+pip install -e path/to/ida-pro-mcp
+```
+
+**2. Open both binaries in IDA** and start the MCP plugin in each with `Ctrl+Alt+M` (Windows) or `Ctrl+Option+M` (Mac). The plugin defaults to port **13337** and auto-increments if that port is taken, so:
+- IDA instance #1 → port **13337**
+- IDA instance #2 → port **13338**
+
+Check each IDA's output window to confirm which port it grabbed. You can also set the port manually via `Edit → Plugins → MCP Configuration` before starting the server.
+
+**3. Run the proxy MCP server** pointing at both instances, assigning each a label:
+
+```sh
+python -m ida_pro_mcp.server \
+  --transport http://127.0.0.1:8744/sse \
+  --ida-rpc win=http://127.0.0.1:13337 \
+  --ida-rpc mac=http://127.0.0.1:13338
+```
+
+**4. Point your MCP client** at the proxy instead of directly at IDA. For example in `opencode.jsonc`:
+
+```json
+"mcp": {
+  "ida-pro": {
+    "type": "remote",
+    "url": "http://127.0.0.1:8744/sse",
+    "enabled": true
+  }
+}
+```
+
+Or as a stdio subprocess (no extra terminal needed):
+
+```json
+"mcp": {
+  "ida-pro": {
+    "type": "local",
+    "command": [
+      "python", "-m", "ida_pro_mcp.server",
+      "--ida-rpc", "win=http://127.0.0.1:13337",
+      "--ida-rpc", "mac=http://127.0.0.1:13338"
+    ],
+    "enabled": true
+  }
+}
+```
+
+### Using Multi-Instance Tools
+
+Two bridge tools are always available:
+
+- **`list_instances`** — shows all registered IDA instances and which is the default
+- **`call_tool_on_instance(instance, tool, arguments)`** — explicitly call any tool on a named instance
+
+Every standard IDA tool also gains an optional **`_instance`** parameter that routes the call to the named instance. The first `--ida-rpc` is the default (used when `_instance` is omitted):
+
+```
+# Read symbols from the Mac (debug) build
+list_funcs(queries="Player*", _instance="mac")
+decompile(addr="0x12345", _instance="mac")
+
+# Apply names and types to the Windows (stripped) build
+rename(batch={func: [{addr: "0x401000", name: "PlayerInit"}]}, _instance="win")
+set_type(edits=[{addr: "0x401000", type_str: "void PlayerInit(PlayerState *self)"}], _instance="win")
+declare_type(decls="struct PlayerState { ... };", _instance="win")
+```
+
+### Example Prompt
+
+```md
+I have two IDA instances open:
+- 'mac': a Mac build with full debug symbols
+- 'win': a Windows build with no symbols
+
+Your task is to transfer knowledge from the Mac build to the Windows build:
+1. List named functions from the mac instance
+2. For each interesting function, read its decompilation and type signature from mac
+3. Find the equivalent function in the win instance by matching size, call patterns, and string references
+4. Apply the name, type signature, and a brief comment to the win instance
+5. Save the win IDB when done
+```
+
 ## SSE Transport & Headless MCP
 
 You can run an SSE server to connect to the user interface like this:

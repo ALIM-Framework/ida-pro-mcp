@@ -70,12 +70,33 @@ def dangerous_op(...):
 
 ### Run
 ```bash
+# Single instance (default port 13337)
 uv run ida-pro-mcp
 uv run ida-pro-mcp --transport http://127.0.0.1:8744/sse
 uv run idalib-mcp --host 127.0.0.1 --port 8745 path/to/binary
 uv run idalib-mcp --isolated-contexts --host 127.0.0.1 --port 8745 path/to/binary
 uv run ida-pro-mcp --unsafe
+
+# Multi-instance: connect two IDA sessions simultaneously
+# IDA #1 (Mac binary, debug symbols) on port 13337
+# IDA #2 (Windows binary, no symbols) on port 13338
+uv run ida-pro-mcp --ida-rpc mac=http://127.0.0.1:13337 --ida-rpc win=http://127.0.0.1:13338
 ```
+
+### Multi-instance routing
+
+Any tool call accepts an optional `_instance` argument to target a specific IDA session:
+```
+# Read from the Mac (symbol-rich) instance
+list_funcs(queries="*", _instance="mac")
+
+# Write to the Windows (no-symbol) instance
+rename_func(addr="0x401000", name="PlayerInit", _instance="win")
+```
+
+Two bridge tools are always available:
+- `list_instances()` — show all registered IDA instances
+- `call_tool_on_instance(instance, tool, arguments)` — explicit cross-instance dispatch
 
 ### MCP inspector
 ```bash
